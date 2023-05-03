@@ -1,0 +1,470 @@
+---
+title: "SF Final Assignment MÓF"
+author: "Group 1"
+date: "4/28/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(forecast)
+```
+
+
+
+
+1. First we read in the public transportation data.
+
+```{r}
+data <- read.csv("data/publicTransport_part.csv")
+```
+
+2. We must now create a time series object with the data.
+
+```{r}
+#data$DATE <- gsub("Mar", "03", data$DATE)
+#data$DATETIME <- paste(data$DATE, data$TIME)
+```
+
+
+
+
+For our frequency, we are faced with a problem. The transport system starts at 6:30 in the morning and finishes at 22:00 in the evening. This means it does not operate on a 24 hour basis, and therefore we cannot use 96 (4 x 24) as our frequency.
+
+In order to calculate the frequency we use the table function to return the number of unique values there are in the date column. This will tell us how many 15-minute timestamps there are per day, and thus the frequency
+
+```{r}
+table(data$DATE)
+```
+We can see that there is a frequency of 63, which we shall use. 
+
+```{r}
+transport.ts <- ts(data$DEMAND,
+                   start = 6:30,
+                   frequency = 63*7)
+
+head(transport.ts)
+tail(transport.ts)
+```
+```{r}
+plot(transport.ts,
+     main = "Public Transport usage over Time",
+     ylab = "Usage (No. of passengers)",
+     xlab = "Time (Date in March)",
+     xaxt = "n")
+axis(1,
+     at = c(6.0:9.0),
+     labels =c("Tue 1st", "Tue 8th", "Tue 15th", "Tue 22nd"))
+grid(nx = NA, ny = NULL,
+     lty = 2,
+     col = "light gray",
+     lwd = 2)
+```
+When we look at the data, we can notice that there isn't much of a trend. There is definitely seasonality however. We can see weekly seasonality - there is a spike in demand on each of the first five days, significant reduced demand on Saturday and even more reduced demand on Sunday. This occurs each week. 
+
+```{r}
+ggAcf(transport.ts)
+ggsubseriesplot(transport.ts)
+```
+
+Preliminary pre processing:
+If we are to do an 80/20 training/testing split, we can calculate the amount of data points needed per set by multiplying the total number of each by 0.8 and 0.2 respectively. 
+
+```{r}
+print(1323*0.8)
+print(1323*0.2)
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+valid.n <- 265
+training.n <- length(transport.ts) - valid.n
+prediction.n <- 63*3
+
+print(valid.n)
+print(training.n)
+print(prediction.n)
+```
+
+Creating training/validation split.
+
+```{r}
+train.ts <- window(transport.ts,
+                   start = c(6.0, 1),
+                   end = c(6.1, training.n))
+
+
+valid.ts <- window(transport.ts,
+                   start = c(6.1, training.n+0.1),
+                   end = c(6.1, training.n+valid.n))
+
+head(train.ts)
+tail(train.ts)
+
+head(valid.ts)
+tail(valid.ts)
+```
+Remaking the testing and validation set.
+
+```{r}
+print(17*63)
+```
+
+
+Mean Prediction
+
+```{r}
+plot(meanf(train.ts, valid.n))
+lines(valid.ts,
+      col = "blue")
+```
+
+Naive Prediction
+
+```{r}
+naive.pred <- naive(train.ts,
+                    h = valid.n)
+plot(transport.ts,
+     ylab = "Demand",
+     xlab = "Time")
+lines(valid.ts,
+      col = "blue")
+lines(naive.pred$mean,
+      lty = 3,
+      lwd = 2,
+      col = "red")
+```
+```{r}
+accuracy(naive.pred, valid.ts)
+```
+
+
+Drift prediction
+
+```{r}
+plot(rwf(train.ts, valid.n, drift = TRUE))
+lines(valid.ts,
+      col = "blue")
+```
+
+Seasonal Naive prediction
+
+```{r}
+snaive.pred <- snaive(train.ts,
+                      h = valid.n)
+
+plot(transport.ts,
+     ylab = "Demand",
+     xlab = "Time")
+lines(valid.ts,
+      col = "blue")
+lines(snaive.pred$mean,
+      lty = 3,
+      lwd = 2,
+      col = "red")
+```
+
+```{r}
+accuracy(snaive.pred, valid.ts)
+checkresiduals(snaive.pred)
+```
+
+
+TSLM with linear trend component
+
+```{r}
+train.lm <- tslm(train.ts~trend)
+
+train.lm.pred <- forecast(train.lm, 
+                          h = valid.n,
+                          level = 1)
+
+plot(train.lm.pred,
+     ylab = "Demand",
+     xlab = "Time",
+     bty = "l",
+     xaxt = "n",
+     main = "",
+     flty = 2)
+lines(train.lm$fitted, lwd = 2)
+lines(valid.ts)
+```
+
+
+```{r}
+accuracy(train.lm.pred, valid.ts)
+checkresiduals(train.lm)
+```
+
+
+TSLM with seasonal component
+
+```{r}
+train.lm.se <- tslm(train.ts ~ season)
+train.lm.se.fc <- forecast(train.lm.se,
+                           h = valid.n)
+
+plot(train.ts,
+     xlab = "Time",
+     ylab = "Demand",
+     bty = "l")
+lines(train.lm.se$fitted, 
+      lwd = 2,
+      lty = 5,
+      col = "red")
+```
+
+```{r}
+accuracy(train.lm.se.fc, transport.ts)
+checkresiduals(train.lm.se)
+```
+
+
+```{r}
+
+```
+
+Linear forecast model with trend and season
+
+This model may not be necessary, because, as previously discussed there isn't much evidence of trend within the time series. Seasonality is already accounted for in the previous model.
+
+```{r}
+train.lm.tse <- tslm(train.ts ~ trend + season)
+summary(train.lm.tse)
+
+train.lm.tse.fc <- forecast(train.lm.tse,
+                            h = valid.n)
+
+plot(transport.ts,
+     xlab = "Time",
+     ylab = "Demand",
+     bty = "l")
+lines(train.lm.tse$fitted, 
+      lwd = 1,
+      lty = 2,
+      col = "red")
+lines(train.lm.tse.fc$fitted,
+      col = "blue")
+```
+
+```{r}
+accuracy(train.lm.tse.fc, transport.ts)
+checkresiduals(train.lm.tse)
+```
+
+
+
+Advanced Exponential Smoothing forecast (ETS)
+
+```{r}
+train.ets <- ets(train.ts)
+ets.fc <- forecast(train.ets, h = valid.n)
+
+plot(transport.ts)
+lines(train.ets$fitted,
+      col = "green")
+lines(valid.ts,
+      col = "red")
+
+```
+
+```{r}
+accuracy(ets.fc, valid.ts)
+checkresiduals(ets.fc)
+```
+
+
+STLF Forecast
+
+```{r}
+train.stlf <- stlf(train.ts)
+ets.stlf <- forecast(train.ets, h = valid.n)
+```
+
+```{r}
+accuracy(ets.stlf, valid.ts)
+checkresiduals(ets.stlf)
+```
+
+```{r}
+plot(transport.ts)
+lines(train.stlf$fitted,
+      col = "green")
+lines(valid.ts,
+      col = "red")
+```
+
+Arima modelling
+
+```{r}
+train.ARIMA <- auto.arima(train.ts)
+```
+
+```{r}
+train.ARIMA
+summary(train.ARIMA)
+```
+
+```{r}
+train.ARIMA.pred <- forecast(train.ARIMA,
+                             h = valid.n)
+```
+
+
+```{r}
+accuracy(train.ARIMA.pred, valid.ts)
+checkresiduals(train.ARIMA.pred)
+```
+
+```{r}
+plot(train.ARIMA.pred,
+     ylab = "Demand",
+     xlab = "Time")
+lines(train.ARIMA.pred$fitted)
+lines(valid.ts, col = "red")
+```
+
+```{r}
+plot(transport.ts)
+lines(train.ARIMA$fitted,
+      col = "red")
+```
+
+```{r}
+head(transport.ts)
+head(train.ts)
+```
+
+```{r}
+table(data$DEMAND)
+```
+
+
+Attempting to run a Prophet model on the time series data
+
+```{r}
+#install.packages('prophet')
+```
+
+```{r}
+library(prophet)
+library(tidyverse)
+```
+
+```{r}
+#Prophet preprocessing
+
+prophet.df <- data
+prophet.df$ds <- paste(prophet.df$DATE, prophet.df$TIME)
+str(prophet.df$ds)
+
+prophet.df$ds <- str_replace_all(prophet.df$ds, "Mar", "03")
+
+library(lubridate)
+prophet.df$ds <- as.POSIXct(prophet.df$ds,
+                            format = "%d-%m-%y %H:%M")
+str(prophet.df$ds)
+colnames(prophet.df)[3] = "y"
+
+prophet.df <- prophet.df[-c(1,2)]
+```
+
+```{r}
+p.model <- prophet(prophet.df)
+p.future <- make_future_dataframe(p.model, periods = valid.n, freq = 96*7)
+tail(p.future)
+forecast.p <- predict(p.model, p.future)
+
+tail(forecast.p)
+
+dyplot.prophet(p.model, forecast.p)
+```
+
+```{r}
+p.cv <- cross_validation(p.model,
+                         initial = training.n,
+                         period = 63,
+                         horizon = valid.n,
+                         units = "15 mins")
+```
+
+
+
+
+Final forecast using Time series Linear model with seasonality
+
+```{r}
+transport.lm.se <- tslm(transport.ts ~ season)
+final.fc <- forecast(transport.lm.se,
+                     h = prediction.n)
+```
+
+```{r}
+plot(transport.ts,
+     main = "Public Transport usage over Time (with forecast)",
+     ylab = "Usage (No. of passengers)",
+     xlab = "Time (Date in March)",
+     xlim = c(6.0, 9.5),
+     xaxt = "n",
+     bty = "l")
+grid(nx = NA, ny = NULL,
+     lty = 2,
+     col = "light gray",
+     lwd = 2)
+lines(train.ts,
+      col = "black")
+lines(train.lm.se$fitted, 
+      lwd = 1,
+      lty = 2,
+      col = "red")
+lines(train.lm.se.fc$mean,
+      lwd = 1,
+      lty = 2,
+      col = "green")
+lines(final.fc$mean, 
+      lwd = 1,
+      col = "blue")
+axis(1,
+     at = c(6.0:9.5),
+     labels =c("Tue 1st", "Tue 8th", "Tue 15th", "Tue 22nd"))
+axis(1,
+     at = 9.45,
+     labels = "25th")
+legend(9.02, 140,
+       legend = c("Time series", "Training", "Validation", "Forecast"),
+       col = c("black","red","green","blue"),
+       lty = c(1, 2, 2, 2),
+       cex = 0.6)
+
+```
+
+```{r}
+plot(final.fc$mean,
+     main = "Public Transport Usage Forecast",
+     ylab = "Usage (No. of passengers)",
+     xlab = "Time (Date in March)",
+     lwd = 2,
+     col = "blue",
+     xaxp = c(0, 5, 4))
+grid(nx = NULL, ny = NULL,
+     lty = 2,
+     col = "light gray",
+     lwd = 2)
+axis(1,
+     at = c(9.01, 9.16, 9.30,9.44),
+     labels =c("22nd", "23rd", "24th", "25th"))
+
+```
+
+```{r}
+accuracy(transport.lm.se$fitted.values, transport.ts)
+checkresiduals(transport.lm.se)
+```
